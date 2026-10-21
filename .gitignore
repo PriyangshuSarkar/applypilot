@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+config.yaml
+profile.yaml
+credentials.json
+token.json
+*.db
+resume.pdf
+STOP
+.env
+out/
+output/
+*.egg-info/
+logs/

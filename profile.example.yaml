@@ -1,0 +1,9 @@
+name: Priyangshu Sarkar
+headline: Software Development Engineer (backend)
+years_experience: 2
+links: {github: github.com/PriyangshuSarkar, linkedin: linkedin.com/in/priyangshu-sarkar-aa4595215}
+skills: [TypeScript, Node.js, NestJS, PostgreSQL, Prisma, Microservices, WebSockets, AWS, Docker]
+highlights:
+  - Built a fault-tolerant inventory system on a microservices architecture
+  - Integrated Zoho and Interakt APIs, automating manual workflows
+  - Reduced PostgreSQL/API latency by 30% in a previous role

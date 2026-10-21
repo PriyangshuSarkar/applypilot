@@ -1,0 +1,42 @@
+search:
+  queries: ["software engineer"]
+  geo_id: "106473691"        # copy from a LinkedIn search URL (geoId=...)
+  experience: [entry]
+  date_posted: past_24h      # past_24h | past_week | past_month
+  exclude_title_words: [principal, staff, director, head, manager, architect, vp, intern]  # add "senior" / "lead" to skip those too
+  salary:                    # buckets copied from a LinkedIn URL (f_SAL=f_SA_id_227001:276001,277001)
+    facet: "227001"
+    values: ["276001", "277001"]
+
+run:
+  jobs_per_run: 10         # target: companies with at least one email to send to
+  max_jobs_examined: 20    # stop looking after this many jobs, even if the target isn't met (limits credits)
+  dry_run: true            # true = never send, print drafts only
+
+limits:
+  max_contacts_per_company: 3
+  max_emails_per_run: 30   # recipients, not messages: 10 companies x 3
+  max_emails_per_day: 30
+  delay_seconds: [45, 120] # random pause between sends
+
+contacts:
+  role_allowlist: [recruiter, talent, hiring, engineering manager, head of engineering, cto]
+
+browser:
+  brave_path: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  user_data_dir: "~/.applypilot/brave-profile"  # copy of Brave data dir (CDP is blocked on the real one)
+  profile_directory: "Profile 1"                # the "Personal" profile
+  cdp_port: 9222
+
+extension:
+  id: "bhbcbkonalnjkflmdkdodieehnmmeknp"   # Email Finder - GetProspect
+  max_reveals_per_company: 3    # per company: HR first, then CEO/founder, then others; null = everyone
+
+llm:
+  host: "http://localhost:11434"
+  model: "gemma4:12b"      # see `ollama list`; backup: qwen3.5:9b
+
+email:
+  sender_name: "Priyangshu Sarkar"
+  resume_path: "~/Library/Mobile Documents/com~apple~CloudDocs/Documents/My CVs/Priyangshu_Sarkar.pdf"
+  opt_out_line: "If this isn't relevant, just reply and I won't follow up."
