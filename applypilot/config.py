@@ -22,9 +22,10 @@ class Search(BaseModel):
 
 
 class Run(BaseModel):
-    jobs_per_run: int = Field(10, ge=1)  # target: companies with at least one email to send to
+    jobs_per_run: int = Field(10, ge=1)  # daily goal: companies with an email to send to (emails sent today count)
     max_jobs_examined: int | None = None  # credit guard; default 2 x jobs_per_run
     dry_run: bool = True
+    keep_days: int = Field(7, ge=1)  # how long a collected job stays in contacts.json (so reruns never redo it)
 
 
 class Limits(BaseModel):
@@ -47,7 +48,15 @@ class Browser(BaseModel):
 
 class Extension(BaseModel):
     id: str = ""
-    max_reveals_per_company: int | None = 3  # None = reveal everyone (spends GetProspect credits!)
+
+
+class Mailmeteor(BaseModel):
+    """Email lookup from LinkedIn profile URLs (throttled and capped)."""
+
+    max_lookups_per_company: int | None = 2  # HR first, then CEO/founder, then others; None = everyone
+    max_lookups_per_run: int | None = None  # None = no cap: keep looking until the daily goal is met
+    max_attempts_per_company: int = 6  # profiles tried per company before giving up
+    delay_seconds: tuple[float, float] = (10, 20)  # minimum gap between lookups (a timer, not a sleep)
 
 
 class Llm(BaseModel):
@@ -71,6 +80,7 @@ class Config(BaseModel):
     contacts: Contacts
     browser: Browser
     extension: Extension = Extension()
+    mailmeteor: Mailmeteor = Mailmeteor()
     llm: Llm = Llm()
     email: Email
 

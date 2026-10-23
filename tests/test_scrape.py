@@ -24,7 +24,7 @@ def test_parse_contacts():
     got = parse_contacts(PANEL)
     assert [c["name"] for c in got] == ["Dalvir Singh", "Ankan Das", "Megha M"]
     assert got[2]["headline"] == "Talent Advisor at SC"
-    assert [c["revealed"] for c in got] == [None, False, False]
+    assert [c["email"] for c in got] == [None, None, None]
 
 
 def test_clean_jd_strips_css():
@@ -33,10 +33,10 @@ def test_clean_jd_strips_css():
     assert clean_jd("Plain text") == "Plain text"
 
 
-def test_parse_contacts_with_revealed_email():
+def test_parse_contacts_with_existing_email():
     text = PANEL.replace("Ankan Das\nIndia\nRelationship Manager at SC\nReveal and save",
                          "Ankan Das\nIndia\nRelationship Manager at SC\nAnkan.Das@sc.com")
     got = parse_contacts(text)
     assert [c["name"] for c in got] == ["Dalvir Singh", "Ankan Das", "Megha M"]
-    assert got[1]["email"] == "ankan.das@sc.com" and got[1]["revealed"] is True
-    assert got[2]["email"] is None and got[2]["revealed"] is False
+    assert got[1]["email"] == "ankan.das@sc.com"
+    assert got[2]["email"] is None

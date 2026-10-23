@@ -50,7 +50,7 @@ def test_store_dedupe_ignores_dry_runs(tmp_path):
 
 
 def test_contact_tier_and_pick():
-    from applypilot.filters import contact_tier, pick_for_reveal
+    from applypilot.filters import contact_tier, pick_contacts
 
     assert contact_tier("Talent Acquisition Partner at X") == 0
     assert contact_tier("Senior HR Business Partner at X") == 0
@@ -64,8 +64,8 @@ def test_contact_tier_and_pick():
         {"name": "vp", "headline": "VP Engineering"},
         {"name": "hr2", "headline": "Head of Talent"},
     ]
-    assert [c["name"] for c in pick_for_reveal(cs, 3)] == ["hr1", "hr2", "ceo"]
-    assert [c["name"] for c in pick_for_reveal(cs[:2], 3)] == ["ceo", "eng"]
+    assert [c["name"] for c in pick_contacts(cs, 3)] == ["hr1", "hr2", "ceo"]
+    assert [c["name"] for c in pick_contacts(cs[:2], 3)] == ["ceo", "eng"]
 
 
 def test_title_excluded_and_sendable():
@@ -78,3 +78,29 @@ def test_title_excluded_and_sendable():
     job = {"contacts": [{"selected": True, "email": "a@x.com"}, {"selected": False, "email": "b@x.com"}]}
     assert has_sendable(job, lambda e: False) is True
     assert has_sendable(job, lambda e: e == "a@x.com") is False  # selected one already emailed
+
+
+def test_fill_emails_stops_at_cap_and_skips_misses():
+    from applypilot.filters import fill_emails
+
+    people = [{"name": n, "email": None} for n in "abcde"]
+    hits = {"a": None, "b": "b@x.com", "c": None, "d": "d@x.com", "e": "e@x.com"}
+    looked = []
+
+    def lookup(c):
+        looked.append(c["name"])
+        c["email"] = hits[c["name"]]
+        return True
+
+    got = fill_emails(people, lookup, 2, max_attempts=10)
+    assert [c["name"] for c in got] == ["b", "d"]
+    assert looked == ["a", "b", "c", "d"]  # "e" never looked up: cap reached
+
+
+def test_fill_emails_attempt_cap_and_existing_emails():
+    from applypilot.filters import fill_emails
+
+    people = [{"name": "x", "email": "x@x.com"}, {"name": "y", "email": None}, {"name": "z", "email": None}]
+    calls = []
+    got = fill_emails(people, lambda c: calls.append(c["name"]) or True, None, max_attempts=1)
+    assert [c["name"] for c in got] == ["x"] and calls == ["y"]  # existing email is free; one live attempt only

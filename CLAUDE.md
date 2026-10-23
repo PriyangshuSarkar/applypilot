@@ -8,11 +8,11 @@ Python tool that finds LinkedIn jobs, gets company contacts via a Brave email-fi
 
 ## Status
 - Done: `config.py`, `store.py`, `filters.py`, `validate.py`, `linkedin.py` (URL builder), `browser.py` (Brave CDP launch), `scrape.py` (jobs, JD, GetProspect contacts), `cli.py` (`collect`, dry run, writes `output/contacts.json`).
-- Reveal step exists behind `collect --reveal [--max-reveals N]` (GetProspect "Reveal and save", costs credits; cap in `extension.max_reveals_per_company`). Panel company is verified before any reveal.
+- Emails come from Mailmeteor, not GetProspect credits: GetProspect's side panel is only used to list a company's employees (free) and read each row's LinkedIn URL; `mailmeteor.py` then looks up the email for the selected contacts (HR first, cap `mailmeteor.max_lookups_per_company`). Results are cached by LinkedIn URL in the store (`lookups` table). Only `valid`/`risky` results are used; `unknown`/none are saved but never emailed. The GetProspect reveal code was removed.
 - `draft` command (`llm.py`, `emails.py`, `resume.py`): builds review-only emails into `output/emails.json` (one LLM call per job; one email per company, all selected contacts in `to`). The model writes only the hook + support paragraphs; code adds the greeting, closing ask (names role + company), opt-out and signature. Drafts are rejected for placeholders, ungrounded numbers, or a sentence mixing numbers from different resume bullets (`blended_numbers`). Sends nothing.
 - `send` command (`gmail.py`, native Gmail API via OAuth, never Playwright): default prints a plan; `--test-to ADDR` sends every draft only to that address with a `[TEST]` prefix; `--live` really sends (re-validates, dedupes, enforces caps, delays, `STOP` file). Needs `credentials.json` (Google Cloud OAuth desktop client); `token.json` is created on first auth.
 
-- `run` command = whole flow: `collect` (reveal on by default) -> start Ollama -> `draft` -> unload/stop Ollama -> `send`. Sends only with `--live`. After each successful send the job is removed from `output/emails.json` and `output/contacts.json` and recorded in the SQLite store (so `collect` never re-processes it or re-spends credits). `draft` keeps existing entries in `emails.json` (manual edits survive) and only drafts new jobs. Failures and `needs_review` entries stay in the files.
+- `run` command = whole flow: `collect` (Mailmeteor lookup on by default) -> start Ollama -> `draft` -> unload/stop Ollama -> `send`. Sends only with `--live`. After each successful send the job leaves `output/emails.json`, is marked `sent_at` in `output/contacts.json` (kept for `run.keep_days`, default 7, then pruned) and is recorded in the SQLite store. `contacts.json` only holds contacts whose email was found; jobs carry `drafted_at` / `sent_at` / `skipped` markers so `collect`, `draft` and `send` never redo a job. `draft` keeps existing entries in `emails.json` (manual edits survive) and only drafts new jobs. Failures and `needs_review` entries stay in the files.
 
 ## Commands
 ```
@@ -27,7 +27,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # setup (no uv inst
 .venv/bin/pytest -q                                          # tests
 .venv/bin/pytest tests/test_emails.py::test_name -q          # single test (no linter configured)
 .venv/bin/python -m applypilot.cli collect --jobs 2          # read-only: jobs + JD + contact list -> output/contacts.json
-.venv/bin/python -m applypilot.cli collect --jobs 1 --reveal --max-reveals 3   # spends credits
+.venv/bin/python -m applypilot.cli collect --jobs 1 --lookup --max-lookups 3   # Mailmeteor email lookups (free, throttled)
 .venv/bin/python -m applypilot.cli send --test-to me@example.com   # test send to yourself first
 .venv/bin/python -m applypilot.cli draft                     # contacts.json -> output/emails.json (local LLM, review only)
 ```
@@ -57,7 +57,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # setup (no uv inst
 ## Environment notes
 - Brave profile "Personal" is `Profile 1` (profile "Default" is the work "Pointo" profile; never touch it).
 - Brave 155 blocks CDP on its real data dir, so we run a **copy** of Profile 1 in `~/.applypilot/brave-profile` on port 9222 (logins carried over). Re-copy if sessions expire. Your normal Brave can stay open.
-- GetProspect extension id `bhbcbkonalnjkflmdkdodieehnmmeknp`: click `#gp-open-panel-button` on a company page, then open the `sidepanel.html?tabId=...` URL from `http://127.0.0.1:9222/json` in a tab and click "View employees". Listing is free; "Reveal and save" spends credits, so never click it without explicit user approval.
+- GetProspect extension id `bhbcbkonalnjkflmdkdodieehnmmeknp`: click `#gp-open-panel-button` on a company page, then open the `sidepanel.html?tabId=...` URL from `http://127.0.0.1:9222/json` in a tab and click "View employees". Listing is free. Never click "Reveal and save" (spends credits; the code for it was removed).
+- Mailmeteor LinkedIn Email Finder (`mailmeteor.com/tools/linkedin-email-finder`) is a web form driven with Playwright; keep the delays/caps in `mailmeteor:` config, and stop the run on any block/error/captcha (`Blocked`); never retry or bypass.
 - `output/` holds scraped personal data and is gitignored.
 - Ollama is installed with `gemma4:12b` (default) and `qwen3.5:9b`. Both run on the `mlx` runner: no JSON-schema output, and hidden thinking is on by default, so `llm.py` sends `think:false` and parses a `SUBJECT:/BODY:` text format. Resume PDF path is `email.resume_path` in `config.yaml`; text is extracted with `pdftotext`.
 - Keep all DOM selectors isolated in `scrape.py` so breakage is local.

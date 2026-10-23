@@ -1,14 +1,15 @@
-"""Read-only LinkedIn + GetProspect scraping. All DOM selectors live here so breakage stays local."""
-import random
+"""Read-only LinkedIn + GetProspect scraping (employee listing only; emails come from mailmeteor.py). All DOM selectors live here so breakage stays local."""
 import re
 
 import httpx
 from playwright.sync_api import BrowserContext, Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from applypilot.config import Config
-from applypilot.filters import contact_tier, pick_for_reveal
+from applypilot.filters import contact_tier
 
 EXT_ID = "bhbcbkonalnjkflmdkdodieehnmmeknp"  # Email Finder - GetProspect
+ROW_LINK = 'a[aria-label$=" on LinkedIn"][href*="linkedin.com/in/"]'
 CARD = '[componentkey^="job-card-component-ref-"]'
 
 
@@ -16,10 +17,23 @@ class Checkpoint(RuntimeError):
     """LinkedIn showed a login/captcha/security wall; stop immediately, never bypass."""
 
 
-def pause(lo: float = 2.5, hi: float = 6.0) -> None:
-    import time
+def wait_for(page: Page, selector: str, cap_ms: int = 15000) -> bool:
+    """Wait for `selector` to appear; False if it never does (cap_ms is only a hang guard, not a delay)."""
+    try:
+        page.wait_for_selector(selector, timeout=cap_ms)
+        return True
+    except PlaywrightTimeout:
+        return False
 
-    time.sleep(random.uniform(lo, hi))
+
+def wait_grows(page: Page, selector: str, count: int, cap_ms: int = 8000) -> bool:
+    """Wait until more than `count` elements match `selector`; False if the list stopped growing."""
+    try:
+        page.wait_for_function("([sel, n]) => document.querySelectorAll(sel).length > n", arg=[selector, count],
+                               timeout=cap_ms)
+        return True
+    except PlaywrightTimeout:
+        return False
 
 
 def guard(page: Page) -> None:
@@ -35,16 +49,26 @@ def collect_job_ids(page: Page, limit: int) -> list[str]:
         ids += [i for i in dict.fromkeys(found) if i not in ids]
         if len(ids) >= limit:
             break
-        last = page.query_selector_all(CARD)[-1]
-        last.scroll_into_view_if_needed()
+        cards = page.query_selector_all(CARD)
+        if not cards:  # page re-rendered (LinkedIn redirects the search URL); wait for the cards to come back
+            if not wait_for(page, CARD):
+                break
+            continue
+        last_key = cards[-1].get_attribute("componentkey")
+        cards[-1].scroll_into_view_if_needed()
         page.mouse.wheel(0, 1500)
-        pause(1.5, 3)
+        try:  # the list is virtualized (card count stays flat), so wait for the last card to change
+            page.wait_for_function("([sel, k]) => { const e = [...document.querySelectorAll(sel)].pop(); "
+                                   "return e && e.getAttribute('componentkey') !== k; }",
+                                   arg=[CARD, last_key], timeout=5000)
+        except PlaywrightTimeout:
+            break  # nothing new loaded
     return ids[:limit]
 
 
 def read_job(page: Page, job_id: str) -> dict:
     page.goto(f"https://www.linkedin.com/jobs/view/{job_id}/")
-    page.wait_for_timeout(4000)
+    wait_for(page, "[data-testid=expandable-text-box]")
     guard(page)
     data = page.evaluate(
         """()=>{
@@ -88,20 +112,23 @@ def open_panel(ctx: BrowserContext, page: Page, company: str) -> Page | None:
     page.bring_to_front()
     page.click("#gp-open-panel-button")
     url = None
-    for _ in range(20):  # a fresh tab gets a fresh tabId; never reuse a stale panel
+    for _ in range(100):  # a fresh tab gets a fresh tabId; never reuse a stale panel
         new = [u for u in _sidepanel_urls() if u not in before]
         if new:
             url = new[-1]
             break
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(100)  # polling the debug endpoint, not a delay
     if not url:
         return None
     panel = ctx.new_page()
     panel.set_viewport_size({"width": 420, "height": 900})
     panel.goto(url)
-    panel.wait_for_timeout(4000)
-    panel.get_by_role("button", name="View employees").click()
-    panel.wait_for_timeout(7000)
+    try:
+        panel.get_by_role("button", name="View employees").click(timeout=15000)
+    except PlaywrightTimeout:
+        panel.close()
+        return None
+    wait_for(panel, ROW_LINK)
     if company.lower() not in panel.inner_text("body")[:500].lower():
         panel.close()
         return None
@@ -109,7 +136,8 @@ def open_panel(ctx: BrowserContext, page: Page, company: str) -> Page | None:
 
 
 def parse_contacts(text: str) -> list[dict]:
-    """Parse the side panel's employee list text: name / location / headline [/ Reveal and save | email]."""
+    """Parse the side panel's employee list text: name / location / headline [/ 'Reveal and save' | email].
+    The 'Reveal and save' button text is ignored (we never click it); an email is kept if the panel already shows one."""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     if "Select all" in lines:
         i = lines.index("Select all") + 1
@@ -118,77 +146,60 @@ def parse_contacts(text: str) -> list[dict]:
     while i + 2 < len(lines):
         name, loc, headline = lines[i : i + 3]
         i += 3
-        revealed, email = None, None
+        email = None
         if i < len(lines) and lines[i] == "Reveal and save":
-            revealed, i = False, i + 1
+            i += 1
         elif i < len(lines) and EMAIL.fullmatch(lines[i]):
-            revealed, email, i = True, lines[i].lower(), i + 1
-        out.append({"name": name, "location": loc, "headline": headline, "email": email, "revealed": revealed})
+            email, i = lines[i].lower(), i + 1
+        out.append({"name": name, "location": loc, "headline": headline, "email": email})
     return out
 
 
-STOP_WORDS = re.compile(r"out of credits|no credits|upgrade|limit reached|not enough credits", re.I)
+def panel_linkedin_urls(panel: Page) -> dict[str, str]:
+    """Employee name -> LinkedIn profile URL, from the row links (aria-label '<name> on LinkedIn')."""
+    pairs = panel.eval_on_selector_all(
+        ROW_LINK,
+        "els=>els.map(e=>[e.getAttribute('aria-label').slice(0,-' on LinkedIn'.length), e.href])",
+    )
+    return {name: href for name, href in pairs}
 
 
-def reveal_contacts(panel: Page, targets: list[dict]) -> tuple[int, str | None]:
-    """Click 'Reveal and save' on each target contact's own row. Spends GetProspect credits."""
-    done = 0
-    for c in targets:
-        if c["revealed"] is not False:  # already revealed (or nothing to reveal)
-            continue
-        row = panel.get_by_text(c["name"], exact=True).first.locator(
-            "xpath=ancestor::*[.//button[normalize-space()='Reveal and save']][1]"
-        )
-        button = row.get_by_role("button", name="Reveal and save")
-        if button.count() != 1:  # ambiguous row: never guess, never spend on the wrong person
-            continue
-        total = panel.get_by_role("button", name="Reveal and save").count()
-        button.click()
-        for _ in range(16):
-            panel.wait_for_timeout(500)
-            if panel.get_by_role("button", name="Reveal and save").count() < total:
-                break
-        else:
-            return done, "reveal did not complete"
-        done += 1
-        if STOP_WORDS.search(panel.inner_text("body")):
-            return done, "credit/plan limit message"
-        pause(0.8, 2)
-    return done, None
-
-
-def read_company_contacts(ctx: BrowserContext, company_url: str, company: str, reveal: bool = False,
-                          cap: int | None = 3, max_scrolls: int = 8) -> dict:
+def read_company_contacts(ctx: BrowserContext, company_url: str, company: str, resolve=None,
+                          max_scrolls: int = 8) -> dict:
+    """List a company's employees from the GetProspect panel (free: no credits spent) with their LinkedIn URLs.
+    The list lazy-loads, so `resolve(new_contacts) -> bool` is called as each batch appears (the caller looks up
+    emails right then); returning True stops scrolling. Without `resolve` the whole list is read."""
     page = ctx.new_page()
     try:
         page.goto(company_url)
-        page.wait_for_timeout(5000)
+        wait_for(page, "#gp-open-panel-button")
         guard(page)
         panel = open_panel(ctx, page, company)
         if panel is None:
-            return {"contacts": [], "revealed_now": 0, "note": "panel could not be verified for this company"}
+            return {"contacts": [], "note": "panel could not be verified for this company"}
         try:
+            seen: dict[str, dict] = {}
             prev, stalls = -1, 0
-            for _ in range(max_scrolls):  # lazy-loaded list; stop after two loads that add nothing
-                n = len(parse_contacts(panel.inner_text("body")))
-                stalls = stalls + 1 if n == prev else 0
+            for _ in range(max_scrolls + 1):
+                listed = parse_contacts(panel.inner_text("body"))
+                urls = panel_linkedin_urls(panel)
+                new = []
+                for c in listed:
+                    if c["name"] not in seen:
+                        c.update(linkedin_url=urls.get(c["name"]), tier=contact_tier(c["headline"]), selected=False)
+                        seen[c["name"]] = c
+                        new.append(c)
+                if resolve and new and resolve(new):
+                    break
+                stalls = stalls + 1 if len(listed) == prev else 0  # stop after two loads that add nothing
                 if stalls >= 2:
                     break
-                prev = n
+                prev = len(listed)
                 panel.mouse.move(200, 500)
                 panel.mouse.wheel(0, 4000)
-                panel.wait_for_timeout(3500)
-            revealed_now, note = 0, None
-            if reveal:
-                revealed_now, note = reveal_contacts(panel, pick_for_reveal(parse_contacts(panel.inner_text("body")), cap))
-            contacts = parse_contacts(panel.inner_text("body"))
-            picked = {c["name"] for c in pick_for_reveal(contacts, cap)}
-            for c in contacts:
-                c["tier"] = contact_tier(c["headline"])
-                c["selected"] = c["name"] in picked
-            return {"contacts": contacts, "revealed_now": revealed_now, "note": note}
+                wait_grows(panel, ROW_LINK, len(urls))
+            return {"contacts": list(seen.values()), "note": None}
         finally:
             panel.close()
     finally:
         page.close()
-        pause()

@@ -58,10 +58,27 @@ def contact_tier(headline: str) -> int:
     return 2
 
 
-def pick_for_reveal(contacts: list[dict], cap: int | None) -> list[dict]:
-    """Top `cap` contacts by tier (stable within a tier). Already-revealed ones count toward the cap."""
+def pick_contacts(contacts: list[dict], cap: int | None) -> list[dict]:
+    """Top `cap` contacts by tier (stable within a tier). Contacts that already have an email count toward the cap."""
     ranked = sorted(contacts, key=lambda c: contact_tier(c["headline"]))
     return ranked if cap is None else ranked[:cap]
+
+
+def fill_emails(ranked: list[dict], lookup, cap: int | None, max_attempts: int) -> list[dict]:
+    """Walk contacts best-first and stop as soon as `cap` of them have an email, so unneeded profiles are never
+    looked up. `lookup(contact) -> bool` fills contact['email'] and says whether it made a live (rate-limited) lookup;
+    at most `max_attempts` live lookups are made. Contacts that already have an email count toward the cap."""
+    found, attempts = [], 0
+    for c in ranked:
+        if cap is not None and len(found) >= cap:
+            break
+        if not c.get("email"):
+            if attempts >= max_attempts:
+                break
+            attempts += bool(lookup(c))
+        if c.get("email"):
+            found.append(c)
+    return found
 
 
 def title_excluded(title: str, words: list[str]) -> str | None:

@@ -40,12 +40,13 @@ def setup(tmp_path, monkeypatch, fail_on=()):
     return emails, contacts, sent, Store(tmp_path / "t.db")
 
 
-def test_success_clears_entries_from_both_files(tmp_path, monkeypatch):
+def test_success_clears_send_queue_and_marks_contacts(tmp_path, monkeypatch):
     emails, contacts, sent, store = setup(tmp_path, monkeypatch)
     cli.send_step(make_cfg(), store, emails, contacts, live=True)
     assert sent == ["a@acme.com", "b@beta.com"]
     assert [d["job_id"] for d in jsonstore.load(emails)] == ["3"]      # needs_review stays
-    assert [c["job_id"] for c in jsonstore.load(contacts)] == ["3"]
+    marked = {c["job_id"]: bool(c.get("sent_at")) for c in jsonstore.load(contacts)}
+    assert marked == {"1": True, "2": True, "3": False}               # kept for keep_days, marked as sent
     assert store.already_emailed("a@acme.com") and store.job_seen("u/1")
 
 

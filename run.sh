@@ -15,6 +15,7 @@ JOBS="${JOBS:-10}"
 
 mkdir -p logs output
 LOG="logs/run-$(date +%Y%m%d-%H%M%S).log"
+ls -1t logs/run-*.log 2>/dev/null | tail -n +11 | xargs rm -f --  # keep only the 10 most recent run logs
 LOCK=output/.run.lock
 
 if [ -e STOP ]; then echo "A STOP file exists. Delete it first (rm STOP)."; exit 1; fi

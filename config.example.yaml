@@ -10,7 +10,8 @@ search:
 
 run:
   jobs_per_run: 10         # target: companies with at least one email to send to
-  max_jobs_examined: 20    # stop looking after this many jobs, even if the target isn't met (limits credits)
+  max_jobs_examined: null  # null = 2 x jobs_per_run: the only bound on jobs examined besides the results page
+  keep_days: 7             # collected jobs stay in output/contacts.json this long; reruns skip them
   dry_run: true            # true = never send, print drafts only
 
 limits:
@@ -30,7 +31,12 @@ browser:
 
 extension:
   id: "bhbcbkonalnjkflmdkdodieehnmmeknp"   # Email Finder - GetProspect
-  max_reveals_per_company: 3    # per company: HR first, then CEO/founder, then others; null = everyone
+
+mailmeteor:               # email lookup from LinkedIn URLs; throttled and capped per run
+  max_lookups_per_company: 2   # HR first, then CEO/founder, then others; null = everyone
+  max_lookups_per_run: null     # no cap: look up until the daily goal (run.jobs_per_run) is met
+  max_attempts_per_company: 6   # profiles tried per company before giving up on it
+  delay_seconds: [10, 20]         # minimum gap between lookups; only blocks if the next one comes early
 
 llm:
   host: "http://localhost:11434"
