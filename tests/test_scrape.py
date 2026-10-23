@@ -1,4 +1,4 @@
-from applypilot.scrape import clean_jd, parse_contacts
+from applypilot.scrape import clean_jd, parse_contacts, parse_hiring_team
 
 PANEL = """View list
 Kriti Arya
@@ -40,3 +40,17 @@ def test_parse_contacts_with_existing_email():
     assert [c["name"] for c in got] == ["Dalvir Singh", "Ankan Das", "Megha M"]
     assert got[1]["email"] == "ankan.das@sc.com"
     assert got[2]["email"] is None
+
+
+def test_parse_hiring_team():
+    rows = [
+        {"href": "https://www.linkedin.com/in/jane-doe?miniProfileUrn=x", "text": ""},
+        {"href": "https://www.linkedin.com/in/jane-doe?miniProfileUrn=x",
+         "text": "Jane Doe\n· 2nd\nTalent Acquisition Lead at Acme\nJob poster"},
+        {"href": "https://www.linkedin.com/company/acme/", "text": "Acme"},
+    ]
+    got = parse_hiring_team(rows)
+    assert got == [{"name": "Jane Doe", "location": "", "headline": "Talent Acquisition Lead at Acme", "email": None,
+                    "linkedin_url": "https://www.linkedin.com/in/jane-doe/", "tier": 0, "selected": False,
+                    "source": "job_post"}]
+    assert parse_hiring_team([]) == []

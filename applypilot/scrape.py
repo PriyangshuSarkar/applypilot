@@ -75,7 +75,16 @@ def read_job(page: Page, job_id: str) -> dict:
           const box=document.querySelector('[data-testid=expandable-text-box]');
           const jd=box?box.innerText.trim():null;
           const c=[...document.querySelectorAll('a[href*="/company/"]')].map(a=>a.href).find(Boolean);
-          return {title:document.title, jd, company_href:c||null};
+          // "Meet the hiring team": climb from the heading to the nearest container holding profile links
+          const h=[...document.querySelectorAll('h1,h2,h3,h4,p,span,div')]
+            .find(e=>e.children.length===0 && /meet the hiring team/i.test(e.textContent));
+          let node=h, team=[];
+          for(let i=0;i<6&&node;i++){
+            node=node.parentElement;
+            team=node?[...node.querySelectorAll('a[href*="/in/"]')].map(a=>({href:a.href,text:a.innerText})):[];
+            if(team.length) break;
+          }
+          return {title:document.title, jd, company_href:c||null, team};
         }"""
     )
     parts = [p.strip() for p in data["title"].split("|")]
@@ -87,7 +96,27 @@ def read_job(page: Page, job_id: str) -> dict:
         "company": parts[1] if len(parts) > 2 else "",
         "company_url": (m.group(1) + "/") if m else None,
         "jd": clean_jd(data["jd"]),
+        "hiring_team": parse_hiring_team(data["team"]),
     }
+
+
+HIRING_NOISE = re.compile(r"[·•]|[·•]?\s*\d+(?:st|nd|rd|th)\+?|job poster|hiring team|message|.*connection.*|view .*profile", re.I)
+PROFILE = re.compile(r"https://[\w.]+/in/[^/?#]+")
+
+
+def parse_hiring_team(rows: list[dict]) -> list[dict]:
+    """'Meet the hiring team' links ({href, text}; a person has an image link and a name link) -> contacts.
+    They get tier 0 (the poster of a job is the best person to write to) and source 'job_post'."""
+    best: dict[str, list[str]] = {}
+    for r in rows:
+        m = PROFILE.match(r.get("href") or "")
+        lines = [l.strip() for l in (r.get("text") or "").splitlines()]
+        lines = [l for l in lines if l and not HIRING_NOISE.fullmatch(l)]
+        if m and lines and len(lines) > len(best.get(m.group(0), [])):
+            best[m.group(0)] = lines
+    return [{"name": l[0], "location": "", "headline": l[1] if len(l) > 1 else "", "email": None,
+             "linkedin_url": url + "/", "tier": 0, "selected": False, "source": "job_post"}
+            for url, l in best.items()]
 
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
