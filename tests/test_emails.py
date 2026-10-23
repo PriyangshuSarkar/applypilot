@@ -13,8 +13,8 @@ def test_greeting_names():
 def test_first_name_and_assemble():
     assert first_name("Siva Prasad S. S") == "Siva"
     body = assemble_body("Core text.", "Siva and Karthik", "Reply to opt out.", "Priyangshu")
-    assert body == "Hi Siva and Karthik,\nCore text. Reply to opt out.\nBest,\nPriyangshu"
-    assert "\n\n" not in assemble_body("A.\n\nB.", "X", "o", "s")
+    assert body == "Hi Siva and Karthik,\n\nCore text. Reply to opt out.\n\nBest,\nPriyangshu"
+    assert assemble_body("A.\n\n\nB.\n\nAsk?", "X", "o", "s\nt") == "Hi X,\n\nA.\n\nB.\n\nAsk? o\n\nBest,\ns\nt"
 
 
 def test_ungrounded_numbers():

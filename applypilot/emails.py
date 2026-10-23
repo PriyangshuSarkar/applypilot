@@ -19,6 +19,9 @@ def greeting_names(recipients: list[Recipient]) -> str:
 
 
 def assemble_body(core: str, greeting: str, opt_out: str, signature: str) -> str:
-    """Plain text with single newlines only (no blank lines); opt-out follows the closing question."""
-    text = f"Hi {greeting},\n{core.strip()} {opt_out.strip()}\nBest,\n{signature.strip()}"
-    return re.sub(r"\n{2,}", "\n", text)
+    """Plain text, one blank line between paragraphs: greeting, the core paragraphs, the closing ask with the
+    opt-out, then 'Best,' and the signature (whose own lines stay together)."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", core.strip()) if p.strip()]
+    paras[-1] = f"{paras[-1]} {opt_out.strip()}"  # the last core paragraph is the closing ask
+    sign_off = f"Best,\n{signature.strip()}"
+    return "\n\n".join([f"Hi {greeting},", *paras, sign_off])
