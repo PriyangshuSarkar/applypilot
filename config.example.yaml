@@ -9,7 +9,7 @@ search:
     values: ["276001", "277001"]
 
 run:
-  jobs_per_run: 10         # target: companies with at least one email to send to
+  jobs_per_run: 10         # target: NEW companies with an email per run (skips and earlier sends do not count)
   max_jobs_examined: null  # null = 2 x jobs_per_run: the only bound on jobs examined besides the results page
   keep_days: 7             # collected jobs stay in output/contacts.json this long; reruns skip them
   dry_run: true            # true = never send, print drafts only

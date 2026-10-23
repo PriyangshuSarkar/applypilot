@@ -22,7 +22,7 @@ class Search(BaseModel):
 
 
 class Run(BaseModel):
-    jobs_per_run: int = Field(10, ge=1)  # daily goal: companies with an email to send to (emails sent today count)
+    jobs_per_run: int = Field(10, ge=1)  # companies newly made ready (with an email) per run; skipped jobs and earlier sends do not count
     max_jobs_examined: int | None = None  # credit guard; default 2 x jobs_per_run
     dry_run: bool = True
     keep_days: int = Field(7, ge=1)  # how long a collected job stays in contacts.json (so reruns never redo it)

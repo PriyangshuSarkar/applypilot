@@ -20,6 +20,7 @@ from applypilot.validate import Draft, blended_numbers, subject_too_similar, ung
 
 app = typer.Typer(no_args_is_help=True)
 CONTACTS = Path("output/contacts.json")
+PAGE, MAX_PAGES = 25, 8  # LinkedIn results per page; pages read per query before giving up
 EMAILS = Path("output/emails.json")
 RUNS_LOG = Path("logs/runs.jsonl")  # one JSON summary line per `run`; the per-run text logs are written by run.sh
 _tag = "cli"
@@ -56,25 +57,43 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
         say(f"dropped {dropped} job(s) older than {cfg.run.keep_days} days from {out}")
     done = {r["job_id"]: r for r in jsonstore.load(out)}
     limit = cfg.run.max_jobs_examined or 2 * n
-    queued = sum(1 for j in done.values() if has_sendable(j, store.already_emailed)) if lookup else 0
-    sent = store.sent_today() if lookup else 0  # one email per company, so emails sent today count toward the goal
-    ready = queued + sent
+    ready = 0  # companies newly made ready in THIS run: earlier sends and queued drafts do not count toward `n`
     if lookup:
-        say(f"daily goal {n}: {sent} emailed today + {queued} queued; will examine at most {limit} new jobs")
+        say(f"goal {n} new companies with an email; will examine at most {limit} new jobs")
     launch_brave(cfg.browser)
     with sync_playwright() as pw:
         browser = connect(pw, cfg.browser)
         ctx = browser.contexts[0]
         search = ctx.new_page()
-        search.goto(build_search_url(cfg.search.queries[0], cfg.search))
-        scrape.wait_for(search, scrape.CARD)
         examined = 0
         finder = mailmeteor.Finder(ctx, store, cfg.mailmeteor)
         try:
-            scrape.guard(search)
-            ids = scrape.collect_job_ids(search, limit * 3)  # extra: handled / excluded jobs are skipped
-            say(f"{len(ids)} jobs on the results page")
-            queue = deque(ids)
+            queue: deque[str] = deque()
+            listed: set[str] = set()
+
+            def result_pages():
+                """Job ids, one results page (25 jobs) at a time, for every configured query."""
+                for query in cfg.search.queries:
+                    base = build_search_url(query, cfg.search)
+                    for start in range(0, PAGE * MAX_PAGES, PAGE):
+                        search.goto(base + (f"&start={start}" if start else ""))
+                        if not scrape.wait_for(search, scrape.CARD):
+                            break  # past the last page of this query
+                        scrape.guard(search)
+                        yield scrape.collect_job_ids(search, PAGE)
+
+            pages = result_pages()
+
+            def refill() -> bool:
+                """Skipped jobs cost nothing: when the queue runs dry, load the next results page."""
+                for ids in pages:
+                    new = [i for i in ids if i not in listed]
+                    listed.update(new)
+                    if new:
+                        say(f"{len(new)} new jobs on the next results page")
+                        queue.extend(new)
+                        return True
+                return False
             ahead: list[dict] = []  # at most one job scraped while a lookup timer runs
             want = cfg.mailmeteor.max_attempts_per_company  # worthwhile (HR / head) profiles needed to try a company
 
@@ -85,7 +104,7 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
             def fetch() -> dict | None:
                 """Scrape the next job worth examining: job page + employee list. No Mailmeteor lookups."""
                 nonlocal seen
-                while queue:
+                while queue or refill():
                     jid = queue.popleft()
                     url = f"https://www.linkedin.com/jobs/view/{jid}/"
                     if store.job_seen(url):
@@ -102,14 +121,25 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
                         say(f"  skip: title contains '{bad}'")
                         store.mark_job(job["url"], job["title"], job["company"])
                         continue
-                    seen = []
-                    res = (scrape.read_company_contacts(ctx, job["company_url"], job["company"], enough if lookup else None)
-                           if job["company_url"] else {"contacts": [], "note": "no company page"})
-                    job["contacts"] = res["contacts"]
-                    if res["note"]:
-                        say(f"  note: {res['note']}")
+                    team = job.pop("hiring_team")
+                    job["contacts"] = team
+                    if team:
+                        say(f"  hiring team: {', '.join(c['name'] for c in team)}")
+                    if not (lookup and team):  # with a hiring team, GetProspect is only a fallback (see load_company)
+                        load_company(job)
                     return job
                 return None
+
+            def load_company(job: dict) -> None:
+                """List the company's employees from GetProspect, after any hiring-team contacts already on the job."""
+                nonlocal seen
+                seen = []
+                res = (scrape.read_company_contacts(ctx, job["company_url"], job["company"], enough if lookup else None)
+                       if job["company_url"] else {"contacts": [], "note": "no company page"})
+                have = {c["linkedin_url"] for c in job["contacts"]}
+                job["contacts"] += [c for c in res["contacts"] if c["linkedin_url"] not in have]
+                if res["note"]:
+                    say(f"  note: {res['note']}")
 
             seen: list[dict] = []
 
@@ -132,18 +162,28 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
                 stats["examined"] = examined
                 blocked = None
                 if lookup:
-                    cands = sorted((c for c in job["contacts"] if c["tier"] < 2), key=lambda c: c["tier"])  # HR, then heads
-                    attempts = [0]
-
                     def look(c: dict) -> bool:
                         live = finder.lookup(c)
                         if live:
-                            attempts[0] += 1
                             say(f"{c['name']} ({c['headline']}): {c['email'] or 'no email'} [{c['email_status']}]", tag="lookup")
                         return live
-                    try:
-                        for c in fill_emails(cands, look, cap, cfg.mailmeteor.max_attempts_per_company):
+
+                    def lookup_pass(pool: list[dict]) -> int:
+                        """Look up `pool` (HR, then heads) and select the contacts that got an email. Returns how many."""
+                        cands = sorted((c for c in pool if c["tier"] < 2), key=lambda c: c["tier"])
+                        got = fill_emails(cands, look, cap, cfg.mailmeteor.max_attempts_per_company)
+                        for c in got:
                             c["selected"] = True
+                        return len(got)
+                    try:
+                        # the people on the job post come first; GetProspect's employee list only if none has an email
+                        post = [c for c in job["contacts"] if c.get("source") == "job_post"]
+                        if not post:  # no hiring team: the company list was already loaded by fetch()
+                            lookup_pass(job["contacts"])
+                        elif not lookup_pass(post):
+                            say("  hiring team: no email, falling back to GetProspect")
+                            load_company(job)
+                            lookup_pass([c for c in job["contacts"] if c not in post])
                     except mailmeteor.Blocked as e:
                         blocked = str(e)
                 else:
@@ -157,7 +197,7 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
                     say(f"STOPPED email lookups: {blocked}", err=True)
                     break
                 if lookup and not job["contacts"]:
-                    if any(c.get("email_status") == "timeout" for c in cands):
+                    if any(c.get("email_status") == "timeout" for c in job["contacts"]):
                         continue  # a lookup timed out: leave the job unmarked so a later run can retry it
                     store.mark_job(job["url"], job["title"], job["company"])  # nobody findable: don't redo it next run
                     continue
