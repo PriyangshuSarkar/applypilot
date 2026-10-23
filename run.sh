@@ -22,7 +22,11 @@ if [ -e STOP ]; then echo "A STOP file exists. Delete it first (rm STOP)."; exit
 if ! mkdir "$LOCK" 2>/dev/null; then
   echo "Another run is in progress. If that's wrong: rmdir $LOCK"; exit 1
 fi
+# keep the Mac awake (display, idle, disk, system-on-AC) for as long as this script lives
+caffeinate -dims -w $$ &
+CAFFEINATE_PID=$!
 cleanup() {
+  kill "$CAFFEINATE_PID" 2>/dev/null
   rmdir "$LOCK" 2>/dev/null
   # close only the automation Brave (own data dir); your normal Brave is untouched
   pkill -f "user-data-dir=$HOME/.applypilot/brave-profile" 2>/dev/null
@@ -45,8 +49,8 @@ else
 fi
 
 echo "== running (log: $LOG)"
-# caffeinate keeps the Mac awake for the whole run; unbuffered so the log is live
-PYTHONUNBUFFERED=1 caffeinate -i $PY -m applypilot.cli run --jobs "$JOBS" $FLAG 2>&1 | tee "$LOG"
+# unbuffered so the log is live
+PYTHONUNBUFFERED=1 $PY -m applypilot.cli run --jobs "$JOBS" $FLAG 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 
 left=$($PY -c "import json,os;p='output/emails.json';print(len(json.load(open(p))) if os.path.exists(p) else 0)")
