@@ -157,6 +157,8 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
                     say(f"STOPPED email lookups: {blocked}", err=True)
                     break
                 if lookup and not job["contacts"]:
+                    if any(c.get("email_status") == "timeout" for c in cands):
+                        continue  # a lookup timed out: leave the job unmarked so a later run can retry it
                     store.mark_job(job["url"], job["title"], job["company"])  # nobody findable: don't redo it next run
                     continue
                 done[job["job_id"]] = job

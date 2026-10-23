@@ -17,11 +17,16 @@ from applypilot.store import Store
 
 URL = "https://mailmeteor.com/tools/linkedin-email-finder"
 STATUSES = {"valid", "risky"}  # "unknown" / anything else is saved but never emailed
+MAX_TIMEOUTS = 3  # consecutive timed-out lookups before the run stops
 BLOCKED = re.compile(r"too many|rate.?limit|try again later|unusual|blocked|captcha|error code|something went wrong|quota", re.I)
 
 
 class Blocked(RuntimeError):
     """Mailmeteor refused or errored; stop looking up emails for this run."""
+
+
+class LookupTimeout(RuntimeError):
+    """One lookup got no result in time: skip that contact (not cached, so a later run retries it)."""
 
 
 class Gate:
@@ -81,7 +86,7 @@ def find_email(page: Page, linkedin_url: str, timeout_s: int = 40) -> dict:
             }""",
             arg=[EMAIL.pattern, BLOCKED.pattern], timeout=timeout_s * 1000)
     except PlaywrightTimeout:
-        raise Blocked("no result before timeout")
+        raise LookupTimeout("no result before timeout")
     return parse_result(page.inner_text("body"))
 
 
@@ -92,6 +97,7 @@ class Finder:
     def __init__(self, ctx: BrowserContext, store: Store, cfg: Mailmeteor):
         self.ctx, self.store, self.cfg = ctx, store, cfg
         self.used = 0
+        self.timeouts = 0  # consecutive; any answer resets it
         self.gate = Gate(cfg.delay_seconds)
         self.idle = None  # work to do while waiting for the gate (e.g. scraping the next job)
 
@@ -110,9 +116,17 @@ class Finder:
         page = self.ctx.new_page()
         try:
             res = find_email(page, url)
+        except LookupTimeout:
+            self.used += 1
+            self.timeouts += 1
+            contact["email"], contact["email_status"] = None, "timeout"
+            if self.timeouts >= MAX_TIMEOUTS:  # repeated silence looks like throttling, not a slow page
+                raise Blocked(f"{self.timeouts} lookups in a row timed out")
+            return True
         finally:
             page.close()
         self.used += 1
+        self.timeouts = 0
         email = res["email"] if res["status"] in STATUSES else None
         self.store.save_lookup(url, email, res["status"])
         contact["email"], contact["email_status"] = email, res["status"]
