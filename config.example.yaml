@@ -10,7 +10,7 @@ search:
 
 run:
   jobs_per_run: 10         # target: NEW companies with an email per run (skips and earlier sends do not count)
-  max_jobs_examined: null  # null = 2 x jobs_per_run: the only bound on jobs examined besides the results page
+  max_jobs_examined: null  # null = 2 x jobs_per_run; 0 = uncapped (runs until the goal or the results run out)
   keep_days: 7             # collected jobs stay in output/contacts.json this long; reruns skip them
   dry_run: true            # true = never send, print drafts only
 

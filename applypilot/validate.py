@@ -77,3 +77,17 @@ def subject_too_similar(subject: str, others: list[str]) -> str | None:
         if (my_nums & set(NUMBER.findall(o))) or (mine and theirs and len(mine & theirs) / len(mine | theirs) >= 0.5):
             return o
     return None
+
+
+SUBJECT_PROBLEMS = ("bad subject length", "subject longer than", "subject too similar")
+
+
+def only_subject_problems(problems: list[str]) -> bool:
+    """True if every problem is cosmetic subject trouble (length / clashing with another email's subject)."""
+    return bool(problems) and all(p.startswith(SUBJECT_PROBLEMS) for p in problems)
+
+
+def fallback_subject(job_title: str, company: str, max_title_words: int = 6) -> str:
+    """A subject built from facts alone (<= 10 words): 'Applying for <role> at <company>'."""
+    role = " ".join(re.split(r"\s+[-–—:|,]\s+", job_title.strip())[0].split()[:max_title_words])
+    return f"Applying for {role} at {company_short(company)}"

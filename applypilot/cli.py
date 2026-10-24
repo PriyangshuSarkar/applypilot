@@ -16,7 +16,8 @@ from applypilot.filters import fill_emails, has_sendable, pick_contacts, remaini
 from applypilot.linkedin import build_search_url
 from applypilot.resume import load_resume_text
 from applypilot.store import Store
-from applypilot.validate import Draft, blended_numbers, subject_too_similar, ungrounded_numbers, validate_draft
+from applypilot.validate import (Draft, blended_numbers, fallback_subject, only_subject_problems, subject_too_similar,
+                                 ungrounded_numbers, validate_draft)
 
 app = typer.Typer(no_args_is_help=True)
 CONTACTS = Path("output/contacts.json")
@@ -56,10 +57,11 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
     if dropped:
         say(f"dropped {dropped} job(s) older than {cfg.run.keep_days} days from {out}")
     done = {r["job_id"]: r for r in jsonstore.load(out)}
-    limit = cfg.run.max_jobs_examined or 2 * n
+    cap = cfg.run.max_jobs_examined
+    limit = 2 * n if cap is None else (cap or float("inf"))  # None = 2 x n, 0 = uncapped
     ready = 0  # companies newly made ready in THIS run: earlier sends and queued drafts do not count toward `n`
     if lookup:
-        say(f"goal {n} new companies with an email; will examine at most {limit} new jobs")
+        say(f"goal {n} new companies with an email; will examine " + ("every new job until then" if limit == float("inf") else f"at most {limit} new jobs"))
     launch_brave(cfg.browser)
     with sync_playwright() as pw:
         browser = connect(pw, cfg.browser)
@@ -196,10 +198,10 @@ def collect_step(cfg: Config, store: Store, n: int, out: Path, lookup: bool, cap
                 if blocked:
                     say(f"STOPPED email lookups: {blocked}", err=True)
                     break
-                if lookup and not job["contacts"]:
-                    if any(c.get("email_status") == "timeout" for c in job["contacts"]):
-                        continue  # a lookup timed out: leave the job unmarked so a later run can retry it
-                    store.mark_job(job["url"], job["title"], job["company"])  # nobody findable: don't redo it next run
+                if lookup and not has_sendable(job, store.already_emailed):
+                    # no email found (or only ones we already used): failed entry, never retried on a rerun
+                    store.mark_job(job["url"], job["title"], job["company"])
+                    say("  -> failed: no usable email, will not be retried")
                     continue
                 done[job["job_id"]] = job
                 jsonstore.save(out, list(done.values()))
@@ -265,6 +267,13 @@ def draft_step(cfg: Config, profile: Profile, store: Store, contacts: Path, out:
         if core is None:
             say(f"skip {job['company']}: model never produced a parsable draft (left in contacts.json)")
             continue
+        if only_subject_problems(problems):  # the body is fine: a cosmetic subject problem must not block the send
+            core = llm.Core(fallback_subject(job["title"], job["company"]), core.body)
+            full = assemble_body(core.body, greeting_names(people), cfg.email.opt_out_line, signature)
+            problems = validate_draft(Draft(core.subject, full), job["company"], cfg.email.opt_out_line)
+            if subject_too_similar(core.subject, [r["subject"] for r in results]):
+                problems.append("fallback subject too similar to another email's subject")
+            say(f"{job['company']}: subject replaced with {core.subject!r} -> {'ok' if not problems else problems}")
         results.append({
             "job_id": job["job_id"], "job_title": job["title"], "company": job["company"], "job_url": job["url"],
             "to": [p.email for p in people], "to_names": [p.name for p in people], "cc": [],

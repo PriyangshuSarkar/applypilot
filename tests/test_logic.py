@@ -1,6 +1,6 @@
 from applypilot.filters import Contact, remaining_budget, select_contacts
 from applypilot.store import Store
-from applypilot.validate import Draft, validate_draft
+from applypilot.validate import Draft, fallback_subject, only_subject_problems, validate_draft
 
 ALLOW = ["recruiter", "engineering manager"]
 
@@ -104,3 +104,16 @@ def test_fill_emails_attempt_cap_and_existing_emails():
     calls = []
     got = fill_emails(people, lambda c: calls.append(c["name"]) or True, None, max_attempts=1)
     assert [c["name"] for c in got] == ["x"] and calls == ["y"]  # existing email is free; one live attempt only
+
+
+def test_fallback_subject_is_short_and_valid():
+    sub = fallback_subject("Software Engineering LMTS - Backend Distributed Systems", "Salesforce")
+    assert sub == "Applying for Software Engineering LMTS at Salesforce"
+    assert len(sub.split()) <= 10
+    assert fallback_subject("Full Stack Engineer", "Standard Chartered India") == "Applying for Full Stack Engineer at Standard Chartered"
+
+
+def test_only_subject_problems():
+    assert only_subject_problems(["subject longer than 10 words; shorten it"])
+    assert not only_subject_problems(["subject too similar to x", "contains placeholder text"])
+    assert not only_subject_problems([])
