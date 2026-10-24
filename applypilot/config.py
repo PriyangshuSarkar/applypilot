@@ -69,7 +69,7 @@ class Llm(BaseModel):
 
 class Email(BaseModel):
     sender_name: str
-    resume_path: str = "~/Library/Mobile Documents/com~apple~CloudDocs/Documents/My CVs/Priyangshu_Sarkar.pdf"
+    resume_path: str = "~/resume.pdf"
     opt_out_line: str
 
 

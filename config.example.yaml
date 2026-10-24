@@ -43,6 +43,6 @@ llm:
   model: "gemma4:12b"      # see `ollama list`; backup: qwen3.5:9b
 
 email:
-  sender_name: "Priyangshu Sarkar"
-  resume_path: "~/Library/Mobile Documents/com~apple~CloudDocs/Documents/My CVs/Priyangshu_Sarkar.pdf"
+  sender_name: "Your Name"
+  resume_path: "~/resume.pdf"            # PDF attached to every email; text is extracted with pdftotext
   opt_out_line: "If this isn't relevant, just reply and I won't follow up."

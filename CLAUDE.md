@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # ApplyPilot
 
-Python tool that finds LinkedIn jobs, gets company contacts via a Brave email-finder extension, drafts a grounded cold email with a local LLM (Ollama), and sends it via the Gmail API with caps. Owner: Priyangshu Sarkar (personal job search tool). See `PLAN.md` for the original idea and `~/.claude/plans/that-i-would-like-eager-lark.md` for the approved Phase 1 plan.
+Python tool that finds LinkedIn jobs, gets company contacts via a Brave email-finder extension, drafts a grounded cold email with a local LLM (Ollama), and sends it via the Gmail API with caps. Personal job search tool.
 
 ## Status
 - Done: `config.py`, `store.py`, `filters.py`, `validate.py`, `linkedin.py` (URL builder), `browser.py` (Brave CDP launch), `scrape.py` (jobs, JD, GetProspect contacts), `cli.py` (`collect`, dry run, writes `output/contacts.json`).
@@ -55,7 +55,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # setup (no uv inst
 - Test live sends first against the user's own address, with `jobs_per_run: 2`.
 
 ## Environment notes
-- Brave profile "Personal" is `Profile 1` (profile "Default" is the work "Pointo" profile; never touch it).
+- Brave profile "Personal" is `Profile 1` (profile "Default" is a separate work profile; never touch it).
 - Brave 155 blocks CDP on its real data dir, so we run a **copy** of Profile 1 in `~/.applypilot/brave-profile` on port 9222 (logins carried over). Re-copy if sessions expire. Your normal Brave can stay open.
 - GetProspect extension id `bhbcbkonalnjkflmdkdodieehnmmeknp`: click `#gp-open-panel-button` on a company page, then open the `sidepanel.html?tabId=...` URL from `http://127.0.0.1:9222/json` in a tab and click "View employees". Listing is free. Never click "Reveal and save" (spends credits; the code for it was removed).
 - Mailmeteor LinkedIn Email Finder (`mailmeteor.com/tools/linkedin-email-finder`) is a web form driven with Playwright; keep the delays/caps in `mailmeteor:` config, and stop the run on any block/error/captcha (`Blocked`); never retry or bypass.

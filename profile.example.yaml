@@ -1,9 +1,10 @@
-name: Priyangshu Sarkar
+# Source of truth for email drafting. Drafts may only use facts listed here.
+name: Your Name
 headline: Software Development Engineer (backend)
 years_experience: 2
-links: {github: github.com/PriyangshuSarkar, linkedin: linkedin.com/in/priyangshu-sarkar-aa4595215}
-skills: [TypeScript, Node.js, NestJS, PostgreSQL, Prisma, Microservices, WebSockets, AWS, Docker]
+links: {github: github.com/your-handle, linkedin: linkedin.com/in/your-handle}
+skills: [TypeScript, Node.js, PostgreSQL, Docker, AWS]
 highlights:
-  - Built a fault-tolerant inventory system on a microservices architecture
-  - Integrated Zoho and Interakt APIs, automating manual workflows
+  - Built an inventory system on a microservices architecture
+  - Integrated third-party APIs, automating manual workflows
   - Reduced PostgreSQL/API latency by 30% in a previous role

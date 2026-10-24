@@ -13,3 +13,15 @@ out/
 output/
 *.egg-info/
 logs/
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+*.sqlite
+*.sqlite3
+*.pdf
+!tests/**/*.pdf
+credentials*.json
+client_secret*.json
